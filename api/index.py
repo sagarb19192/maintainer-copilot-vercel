@@ -73,44 +73,71 @@ def fetch_issue(url):
     return {'title': (data.get('title') or '')[:300], 'body': (data.get('body') or '')[:12000]}
 
 
+
 class handler(BaseHTTPRequestHandler):
     def respond(self, code, payload):
-        encoded = json.dumps(payload).encode('utf-8')
+        encoded = json.dumps(payload).encode("utf-8")
         self.send_response(code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
-        self.send_header('Content-Length', str(len(encoded)))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(encoded)))
         self.end_headers()
         self.wfile.write(encoded)
 
     def do_POST(self):
-        if self.path != '/api/analyze':
-            return self.respond(404, {'error': 'Not found'})
         try:
-            size = int(self.headers.get('Content-Length', '0'))
+            size = int(self.headers.get("Content-Length", "0"))
             if size < 1 or size > 30000:
-                return self.respond(413, {'error': 'Request must be between 1 and 30000 bytes'})
+                return self.respond(413, {
+                    "error": "Request must be between 1 and 30000 bytes"
+                })
+
             data = json.loads(self.rfile.read(size))
-            title = data.get('title', '')
-            body = data.get('body', '')
-            if not isinstance(title, str) or not isinstance(body, str) or not title.strip() or not body.strip() or len(title) > 300 or len(body) > 12000:
-                return self.respond(400, {'error': 'Title and description required (max 300/12000 characters)'})
-            return self.respond(200, analyze(title.strip(), body.strip()))
+            title = data.get("title", "")
+            body = data.get("body", "")
+
+            if (
+                not isinstance(title, str)
+                or not isinstance(body, str)
+                or not title.strip()
+                or not body.strip()
+                or len(title) > 300
+                or len(body) > 12000
+            ):
+                return self.respond(400, {
+                    "error": "Title and description required (max 300/12000 characters)"
+                })
+
+            return self.respond(
+                200, analyze(title.strip(), body.strip())
+            )
+
         except (ValueError, json.JSONDecodeError) as exc:
-            return self.respond(400, {'error': str(exc)[:200]})
+            return self.respond(400, {"error": str(exc)[:200]})
         except Exception:
-            return self.respond(502, {'error': 'Analysis failed. Check API configuration, model access and deployment logs.'})
+            return self.respond(502, {
+                "error": "Analysis failed. Check API configuration and deployment logs."
+            })
 
     def do_GET(self):
-        if self.path.startswith('/api/issue?'):
-            from urllib.parse import parse_qs
+        parsed = urlparse(self.path)
+        params = __import__("urllib.parse", fromlist=["parse_qs"]).parse_qs(
+            parsed.query
+        )
+
+        if "url" in params:
             try:
-                url = parse_qs(urlparse(self.path).query).get('url', [''])[0]
-                return self.respond(200, fetch_issue(url))
+                result = fetch_issue(params["url"][0])
+                return self.respond(200, result)
             except ValueError as exc:
-                return self.respond(400, {'error': str(exc)})
+                return self.respond(400, {"error": str(exc)})
             except requests.RequestException:
-                return self.respond(502, {'error': 'GitHub request failed'})
-        if self.path == '/api/health':
-            return self.respond(200, {'status': 'ok', 'mode': 'claude_api' if os.getenv('ANTHROPIC_API_KEY') else 'demo'})
-        return self.respond(404, {'error': 'Not found'})
+                return self.respond(502, {"error": "GitHub request failed"})
+
+        if parsed.path.endswith("/health") or parsed.path.endswith("/index.py"):
+            return self.respond(200, {
+                "status": "ok",
+                "mode": "claude_api" if os.getenv("ANTHROPIC_API_KEY") else "demo"
+            })
+
+        return self.respond(404, {"error": "Not found"})
